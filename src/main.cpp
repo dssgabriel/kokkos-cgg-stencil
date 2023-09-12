@@ -1,9 +1,13 @@
 #include <fmt/core.h>
 #include <fmt/chrono.h>
 #include <Kokkos_Core.hpp>
+#include <Kokkos_OffsetView.hpp>
 
 #include <cmath>
 #include <ranges>
+
+namespace KE = Kokkos::Experimental;
+namespace rv = std::ranges::views;
 
 using Instant = std::chrono::high_resolution_clock;
 
@@ -26,7 +30,7 @@ auto powi_f64 = [](double value, int n) {
         return 1.0;
     }
     double result = 1.0;
-    for (size_t _ = 0; _ < static_cast<size_t>(n); ++_) {
+    for (auto _: rv::iota(0, n)) {
         result *= value;
     }
     return n >= 0 ? result : 1.0 / result;
@@ -38,7 +42,7 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
         // Exponents array initialization
         auto exponents = []() {
             std::array<double, HALF_ORDER> tmp {};
-            for (auto [val, n]: std::ranges::zip_view(tmp, std::ranges::iota_view(0uz, HALF_ORDER))) {
+            for (auto [val, n]: rv::zip(tmp, rv::iota(0uz, HALF_ORDER))) {
                 val = 1.0 / powi_f64(EXPONENT, n + 1);
             }
             return tmp;
@@ -49,31 +53,18 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
         Kokkos::View<double[MAXX][MAXY][MAXZ]> B("B");
         Kokkos::View<double[MAXX][MAXY][MAXZ]> C("C");
         // Get subviews on inner parts of the tensors
-        auto sA = Kokkos::subview(
-            A,
-            Kokkos::make_pair(HALF_ORDER, MAXX - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXY - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXZ - HALF_ORDER)
-        );
-        auto sB = Kokkos::subview(
-            B,
-            Kokkos::make_pair(HALF_ORDER, MAXX - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXY - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXZ - HALF_ORDER)
-        );
-        auto sC = Kokkos::subview(
-            C,
-            Kokkos::make_pair(HALF_ORDER, MAXX - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXY - HALF_ORDER),
-            Kokkos::make_pair(HALF_ORDER, MAXZ - HALF_ORDER)
-        );
+        KE::OffsetView<double***> sA(A, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
+        KE::OffsetView<double***> sB(B, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
+        KE::OffsetView<double***> sC(C, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
 
         // Tensors initialization
         Kokkos::parallel_for(
-             Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {MAXX, MAXY, MAXZ}),
-             KOKKOS_LAMBDA(size_t const x, size_t const y, size_t const z) {
-                 B(x, y, z) = sin(static_cast<double>(z) * cos(static_cast<double>(y) + 0.817)
+            Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {MAXX, MAXY, MAXZ}),
+            KOKKOS_LAMBDA(size_t const x, size_t const y, size_t const z) {
+                A(x, y, z) = 0.0;
+                B(x, y, z) = sin(static_cast<double>(z) * cos(static_cast<double>(y) + 0.817)
                      * cos(static_cast<double>(x) + 0.311) + 0.613);
+                C(x, y, z) = 0.0;
         });
         Kokkos::parallel_for(
             Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {DIMX, DIMY, DIMZ}),
@@ -82,7 +73,7 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
         });
 
         // Main loop
-        for (auto _iter: std::ranges::iota_view(1, 6)) {
+        for (auto _iter: rv::iota(1, 6)) {
             fmt::print("#{} | ", _iter);
 
             // Benchmarked function: Jacobi iteration
@@ -114,10 +105,10 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
             auto stop = Instant::now();
 
             // Output iteration results
-            for (auto idx: std::ranges::iota_view(0, 5)) {
+            for (auto idx: rv::iota(0, 5)) {
                 fmt::print("{:<+018.15} ", A(DIMX / 2 + idx, DIMY / 2 + idx, DIMZ / 2 + idx));
             }
-            fmt::print("\t| {:>6}\n", std::chrono::duration_cast<std::chrono::microseconds>(stop - start));
+            fmt::print("\t| {:>6}\n", stop - start);
         }
     }
     Kokkos::finalize();
