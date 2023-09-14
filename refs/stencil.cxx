@@ -1,23 +1,29 @@
+#include <chrono>
+#include <fmt/core.h>
+#include <fmt/chrono.h>
+
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <iostream>
+#include <ranges>
 #include <sys/time.h>
 #include <vector>
 
+namespace rv = std::ranges::views;
+using namespace std::chrono;
 using float64_t = double;
-using MicroSeconds = float64_t;
-using Instant = struct timespec;
+using Instant = high_resolution_clock;
 
 /// Preset dimensions of the problem.
 enum Preset: size_t {
+    Mini = 4,
     Small = 100,
     Medium = 500,
     Big = 1000,
 };
 
 #if !defined(PRESET)
-#    define PRESET Small
+#    define PRESET Mini
 #endif
 #if !defined(NB_ITERATIONS)
 #    define NB_ITERATIONS 5
@@ -40,26 +46,6 @@ static constexpr size_t MAXZ = DIMZ + ORDER;
 static constexpr size_t XY_PLANE = MAXX * MAXY;
 static constexpr size_t TENSOR_SIZE = MAXX * MAXY * MAXZ;
 
-namespace instant {
-    /// Returns an instant in time corresponding to "now".
-    [[nodiscard]] static inline
-    auto now() -> Instant {
-        Instant now;
-        clock_gettime(CLOCK_MONOTONIC_RAW, &now);    
-        return now;
-    }
-
-    /// Returns the number of microseconds elapsed since an earlier point in time.
-    [[nodiscard]] static inline
-    auto elapsed_since(Instant const& start) -> MicroSeconds {
-        Instant const stop = now();
-        return static_cast<MicroSeconds>(
-            (stop.tv_sec - start.tv_sec) * ONE_MILLION
-            + (stop.tv_nsec - start.tv_nsec) / ONE_THOUSAND
-        );
-    }
-} // namespace instant
-
 /// Returns an offset in the center of the tensor of dimensions [0, DIM).
 [[nodiscard]] static inline
 auto dim_xyz(size_t x, size_t y, size_t z) -> size_t {
@@ -77,6 +63,18 @@ auto tensor_xyz(size_t x, size_t y, size_t z) -> size_t {
     size_t const y_offset = y * MAXX;
     size_t const x_offset = x;
     return z_offset + y_offset + x_offset;
+}
+
+auto print_tensor(std::vector<double>const & T) -> void {
+    for (auto x: rv::iota(0uz, MAXX)) {
+        for (auto y: rv::iota(0uz, MAXY)) {
+            for (auto z: rv::iota(0uz, MAXZ)) {
+                fmt::print("{} ", T[tensor_xyz(x, y, z)]);
+            }
+            fmt::print("\n");
+        }
+        fmt::print("\n\n");
+    }
 }
 
 /// Initializes the tensors for the problem to solve.
@@ -123,7 +121,7 @@ auto jacobi_iteration(
     std::vector<float64_t>& C,
     std::array<float64_t, HALF_ORDER> const& exponents
 ) -> void {
-    #pragma omp parallel
+    #pragma omp parallel schedule(dynamic)
     {
         #pragma omp for
         for (size_t z = 0; z < DIMZ; ++z) {
@@ -218,18 +216,26 @@ auto main() -> int32_t {
     }();
 
     initialize_tensors(A, B);
+    // print_tensor(A);
+    // print_tensor(B);
+    // print_tensor(C);
 
     for (size_t i = 0; i < NB_ITERATIONS; ++i) {
-        Instant const start = instant::now();
+        auto start = Instant::now();
         jacobi_iteration(A, B, C, exponents);
-        MicroSeconds elapsed = instant::elapsed_since(start);
+        auto stop = Instant::now();
 
-        printf("_0_");
-        for (size_t j = 0; j < 5; j++) {
-            printf(" %18.15lf", A[dim_xyz(DIMX / 2 + j, DIMY / 2 + j, DIMZ / 2 + j)]);
+        // fmt::print("_0_");
+        // for (size_t j = 0; j < 5; j++) {
+        //     fmt::print(" {}", A[dim_xyz(DIMX / 2 + j, DIMY / 2 + j, DIMZ / 2 + j)]);
+        // }
+        // float64_t ns_point = elapsed * ONE_THOUSAND / DIMX / DIMY / DIMZ;
+        // fmt::print(" {} {} {} {} {}\n", elapsed, ns_point, DIMX, DIMY, DIMZ);
+        // Output iteration results
+        for (auto idx: rv::iota(0, 5)) {
+            fmt::print("{:<+018.15} ", A[dim_xyz(DIMX / 2 + idx, DIMY / 2 + idx, DIMZ / 2 + idx)]);
         }
-        float64_t ns_point = elapsed * ONE_THOUSAND / DIMX / DIMY / DIMZ;
-        printf(" %10.0lf %10.3lf %zu %zu %zu\n", elapsed, ns_point, DIMX, DIMY, DIMZ);
+        fmt::print("\t| {:>6}\n", duration_cast<microseconds>(stop - start));
     }
 
     return 0;
