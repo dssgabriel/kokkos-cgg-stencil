@@ -12,6 +12,7 @@ using Instant = high_resolution_clock;
 
 /// Preset dimensions of the problem.
 enum Preset: size_t {
+    Mini  = 4,
     Small = 100,
     Medium = 500,
     Big = 1000,
@@ -48,6 +49,18 @@ auto powi_f64 = [](double value, int n) {
     return n >= 0 ? result : 1.0 / result;
 };
 
+auto print_tensor(Kokkos::View<double [MAXX][MAXY][MAXZ]>& T) -> void {
+    for (auto x: rv::iota(0uz, MAXX)) {
+        for (auto y: rv::iota(0uz, MAXY)) {
+            for (auto z: rv::iota(0uz, MAXZ)) {
+                fmt::print("{} ", T(x, y, z));
+            }
+            fmt::print("\n");
+        }
+        fmt::print("\n\n");
+    }
+}
+
 auto main(int32_t argc, char* argv[]) -> int32_t {
     Kokkos::initialize(argc, argv);
     {
@@ -83,6 +96,10 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
                 A(x, y, z) = 1.0;
         });
 
+        // print_tensor(A);
+        // print_tensor(B);
+        // print_tensor(C);
+
         // Main loop
         for (auto _iter: rv::iota(1, NB_ITERATIONS + 1)) {
             fmt::print("#{} | ", _iter);
@@ -114,7 +131,7 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
                     }
                     C(x, y, z) = acc;
             });
-            std::swap(A, C);
+            Kokkos::deep_copy(A, C);
             auto stop = Instant::now();
 
             // Output iteration results
