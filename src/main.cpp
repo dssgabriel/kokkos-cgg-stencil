@@ -1,28 +1,40 @@
 #include <fmt/core.h>
 #include <fmt/chrono.h>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_OffsetView.hpp>
 
 #include <cmath>
 #include <ranges>
 
-namespace KE = Kokkos::Experimental;
 namespace rv = std::ranges::views;
+using namespace std::chrono;
 
-using Instant = std::chrono::high_resolution_clock;
+using Instant = high_resolution_clock;
 
-constexpr size_t ORDER = 16;
-constexpr size_t HALF_ORDER = ORDER / 2;
-constexpr size_t TENSOR_SIZE = 100;
+/// Preset dimensions of the problem.
+enum Preset: size_t {
+    Small = 100,
+    Medium = 500,
+    Big = 1000,
+};
 
-constexpr size_t DIMX = TENSOR_SIZE;
-constexpr size_t DIMY = TENSOR_SIZE;
-constexpr size_t DIMZ = TENSOR_SIZE;
-constexpr size_t MAXX = TENSOR_SIZE + ORDER;
-constexpr size_t MAXY = TENSOR_SIZE + ORDER;
-constexpr size_t MAXZ = TENSOR_SIZE + ORDER;
+#if !defined(PRESET)
+#    define PRESET Small
+#endif
+#if !defined(NB_ITERATIONS)
+#    define NB_ITERATIONS 5
+#endif
 
-constexpr double EXPONENT = 17.0;
+static constexpr size_t ORDER = 16;
+static constexpr size_t HALF_ORDER = ORDER / 2;
+
+static constexpr size_t DIMX = PRESET;
+static constexpr size_t DIMY = PRESET;
+static constexpr size_t DIMZ = PRESET;
+static constexpr size_t MAXX = DIMX + ORDER;
+static constexpr size_t MAXY = DIMY + ORDER;
+static constexpr size_t MAXZ = DIMZ + ORDER;
+
+static constexpr double EXPONENT = 17.0;
 
 // Elevate double-precision floating-point value to power `n`, similar to Rust's `f64::powi`
 auto powi_f64 = [](double value, int n) {
@@ -52,10 +64,6 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
         Kokkos::View<double[MAXX][MAXY][MAXZ]> A("A");
         Kokkos::View<double[MAXX][MAXY][MAXZ]> B("B");
         Kokkos::View<double[MAXX][MAXY][MAXZ]> C("C");
-        // Get subviews on inner parts of the tensors
-        KE::OffsetView<double***> sA(A, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
-        KE::OffsetView<double***> sB(B, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
-        KE::OffsetView<double***> sC(C, {HALF_ORDER, HALF_ORDER, HALF_ORDER});
 
         // Tensors initialization
         Kokkos::parallel_for(
@@ -67,40 +75,45 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
                 C(x, y, z) = 0.0;
         });
         Kokkos::parallel_for(
-            Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {DIMX, DIMY, DIMZ}),
+            Kokkos::MDRangePolicy<Kokkos::Rank<3>>(
+                {HALF_ORDER, HALF_ORDER, HALF_ORDER},
+                {DIMX + HALF_ORDER, DIMY + HALF_ORDER, DIMZ + HALF_ORDER}
+            ),
             KOKKOS_LAMBDA(size_t const x, size_t const y, size_t const z) {
-                sA(x, y, z) = 1.0;
+                A(x, y, z) = 1.0;
         });
 
         // Main loop
-        for (auto _iter: rv::iota(1, 6)) {
+        for (auto _iter: rv::iota(1, NB_ITERATIONS + 1)) {
             fmt::print("#{} | ", _iter);
 
             // Benchmarked function: Jacobi iteration
             auto start = Instant::now();
-            // Hadamar-Schur product A_tmp = (A * B)
             Kokkos::parallel_for(
-                Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {DIMX, DIMY, DIMZ}),
+                Kokkos::MDRangePolicy<Kokkos::Rank<3>>(
+                    {HALF_ORDER, HALF_ORDER, HALF_ORDER},
+                    {DIMX + HALF_ORDER, DIMY + HALF_ORDER, DIMZ + HALF_ORDER}
+                ),
                 KOKKOS_LAMBDA(size_t const x, size_t const y, size_t const z) {
-                    sA(x, y, z) *= sB(x, y, z);
+                    A(x, y, z) *= B(x, y, z);
             });
-            // Multiply-Accumulate of C += A_tmp * exp
             Kokkos::parallel_for(
-                Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {DIMX, DIMY, DIMZ}),
+                Kokkos::MDRangePolicy<Kokkos::Rank<3>>(
+                    {HALF_ORDER, HALF_ORDER, HALF_ORDER},
+                    {DIMX + HALF_ORDER, DIMY + HALF_ORDER, DIMZ + HALF_ORDER}
+                ),
                 KOKKOS_LAMBDA(size_t const x, size_t const y, size_t const z) {
-                    double acc = sA(x, y, z);
-                    for (auto n: std::ranges::iota_view(0uz, HALF_ORDER)) {
-                        double exp = exponents[n];
-                        acc += sA(x - n, y, z) * exp;
-                        acc += sA(x + n, y, z) * exp;
-                        acc += sA(x, y - n, z) * exp;
-                        acc += sA(x, y + n, z) * exp;
-                        acc += sA(x, y, z - n) * exp;
-                        acc += sA(x, y, z + n) * exp;
+                    double acc = A(x, y, z);
+                    for (auto [n, exp]: rv::zip(rv::iota(1uz, HALF_ORDER + 1), exponents)) {
+                        acc += A(x - n, y, z) * exp;
+                        acc += A(x + n, y, z) * exp;
+                        acc += A(x, y - n, z) * exp;
+                        acc += A(x, y + n, z) * exp;
+                        acc += A(x, y, z - n) * exp;
+                        acc += A(x, y, z + n) * exp;
                     }
-                    sC(x, y, z) = acc;
+                    C(x, y, z) = acc;
             });
-            // Swap pointers of A_tmp and C for next iteration (avoids tensor copy)
             std::swap(A, C);
             auto stop = Instant::now();
 
@@ -108,7 +121,7 @@ auto main(int32_t argc, char* argv[]) -> int32_t {
             for (auto idx: rv::iota(0, 5)) {
                 fmt::print("{:<+018.15} ", A(DIMX / 2 + idx, DIMY / 2 + idx, DIMZ / 2 + idx));
             }
-            fmt::print("\t| {:>6}\n", stop - start);
+            fmt::print("\t| {:>6}\n", duration_cast<microseconds>(stop - start));
         }
     }
     Kokkos::finalize();
