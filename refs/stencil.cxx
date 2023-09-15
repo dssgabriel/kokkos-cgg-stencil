@@ -23,7 +23,7 @@ enum Preset: size_t {
 };
 
 #if !defined(PRESET)
-#    define PRESET Mini
+#    define PRESET Small
 #endif
 #if !defined(NB_ITERATIONS)
 #    define NB_ITERATIONS 5
@@ -65,7 +65,7 @@ auto tensor_xyz(size_t x, size_t y, size_t z) -> size_t {
     return z_offset + y_offset + x_offset;
 }
 
-auto print_tensor(std::vector<double>const & T) -> void {
+auto print_tensor(std::vector<double> const& T) -> void {
     for (auto x: rv::iota(0uz, MAXX)) {
         for (auto y: rv::iota(0uz, MAXY)) {
             for (auto z: rv::iota(0uz, MAXZ)) {
@@ -216,21 +216,13 @@ auto main() -> int32_t {
     }();
 
     initialize_tensors(A, B);
-    // print_tensor(A);
-    // print_tensor(B);
-    // print_tensor(C);
 
     for (size_t i = 0; i < NB_ITERATIONS; ++i) {
+        fmt::print("#{} | ", i + 1);
         auto start = Instant::now();
         jacobi_iteration(A, B, C, exponents);
         auto stop = Instant::now();
 
-        // fmt::print("_0_");
-        // for (size_t j = 0; j < 5; j++) {
-        //     fmt::print(" {}", A[dim_xyz(DIMX / 2 + j, DIMY / 2 + j, DIMZ / 2 + j)]);
-        // }
-        // float64_t ns_point = elapsed * ONE_THOUSAND / DIMX / DIMY / DIMZ;
-        // fmt::print(" {} {} {} {} {}\n", elapsed, ns_point, DIMX, DIMY, DIMZ);
         // Output iteration results
         for (auto idx: rv::iota(0, 5)) {
             fmt::print("{:<+018.15} ", A[dim_xyz(DIMX / 2 + idx, DIMY / 2 + idx, DIMZ / 2 + idx)]);
